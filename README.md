@@ -24,5 +24,7 @@ El objetivo de este proyecto es desarrollar y desplegar un producto de analític
 * Exploración de los datos.
 * Maqueta del prototipo.
 * Repositorios con todo el código (capturas y enlaces que soporten la creación y uso de repositorios).
+
 2. Conjuntos de datos a emplear.
+
 3. Reporte de trabajo en equipo de máximo 1 página.

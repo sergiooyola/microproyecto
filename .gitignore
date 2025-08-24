@@ -1,0 +1,3 @@
+
+# Ignore local Moniforge installer
+**/Miniforge.sh

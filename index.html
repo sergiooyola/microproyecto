@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Riesgo de Cancelación de Reservas</title>
+  <style>
+    :root{
+      --bg:#0b0b10; --card:#14141b; --muted:#a7a7b3; --border:#222230; --accent:#6d6df6; --text:#e7e7ea;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);}
+    .container{max-width:1100px;margin:32px auto;padding:16px;}
+    .title{font-weight:800;font-size:28px;margin:0 0 6px}
+    .subtitle{margin:0 0 18px;color:var(--muted)}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.25);}
+    .row{display:flex;gap:16px;flex-wrap:wrap}
+    .col{flex:1 1 240px}
+    label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+    input[type="range"]{width:100%}
+    .value{font-size:14px;color:var(--muted)}
+    .btn{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:10px 14px;cursor:pointer}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .input{width:100%;padding:10px;border-radius:10px;border:1px solid var(--border);background:#0e0e14;color:var(--text)}
+    h3{margin:22px 0 10px}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:10px;border-bottom:1px solid #262636;font-size:14px;text-align:left}
+    th{color:var(--muted);font-weight:600}
+    .right{display:flex;gap:8px;align-items:center;justify-content:flex-end}
+    .note{font-size:13px;color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="title">Riesgo de Cancelación de Reservas</h1>
+    <p class="subtitle">Prototipo para Revenue Managers — predicción y drivers</p>
+
+    <div class="card">
+      <div class="row">
+        <div class="col">
+          <label>Ventana de llegada (días)</label>
+          <input id="inWin" type="range" min="1" max="60" value="14">
+          <div class="value"><span id="valWin">14</span></div>
+        </div>
+        <div class="col">
+          <label>Top reservas por riesgo</label>
+          <input id="inTop" type="range" min="5" max="200" value="20">
+          <div class="value"><span id="valTop">20</span></div>
+        </div>
+        <div class="col">
+          <label>Umbral de alerta</label>
+          <input id="inThr" type="range" min="0" max="1" step="0.01" value="0.5">
+          <div class="value"><span id="valThr">50.00</span> %</div>
+        </div>
+        <div class="col right">
+          <button id="btnRefresh" class="btn">Actualizar</button>
+        </div>
+      </div>
+    </div>
+
+    <h3>Próximas reservas alto riesgo</h3>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>Booking_ID</th>
+            <th>arrival_dt</th>
+            <th>no_of_adults</th>
+            <th>avg_price_per_room</th>
+            <th>no_of_special_requests</th>
+            <th>Riesgo</th>
+          </tr>
+        </thead>
+        <tbody id="tbody">
+          <tr><td colspan="6" class="note">Sin resultados. Ajusta los filtros y pulsa “Actualizar”.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Consulta de reserva específica</h3>
+    <div class="card">
+      <div class="row">
+        <div class="col">
+          <label>Booking_ID</label>
+          <input id="inBooking" class="input" placeholder="48003874">
+        </div>
+        <div class="col">
+          <label>What–If mínimo</label>
+          <input id="inWhatIf" class="input" type="number" value="95">
+        </div>
+        <div class="col right">
+          <button id="btnCalc" class="btn">Calcular</button>
+        </div>
+      </div>
+      <p id="singleOut" class="value" style="margin-top:10px"></p>
+      <p class="note">Nota: este prototipo busca el Booking_ID dentro del ranking obtenido. Si no aparece con el top y umbral actuales, amplía el Top y baja el Umbral.</p>
+    </div>
+  </div>
+
+  <script>
+    // ======= CONFIG =======
+    const API_BASE = (window.API_BASE) || "http://localhost:8000";
+
+    // ======= UI refs =======
+    const inWin = document.getElementById('inWin');
+    const inTop = document.getElementById('inTop');
+    const inThr = document.getElementById('inThr');
+    const valWin = document.getElementById('valWin');
+    const valTop = document.getElementById('valTop');
+    const valThr = document.getElementById('valThr');
+    const btnRefresh = document.getElementById('btnRefresh');
+    const tbody = document.getElementById('tbody');
+    const inBooking = document.getElementById('inBooking');
+    const inWhatIf = document.getElementById('inWhatIf');
+    const btnCalc = document.getElementById('btnCalc');
+    const singleOut = document.getElementById('singleOut');
+
+    let lastRows = [];
+
+    function fmtPct(x){ return (x*100).toFixed(2)+'%'; }
+    function setVals(){
+      valWin.textContent = inWin.value;
+      valTop.textContent = inTop.value;
+      valThr.textContent = (parseFloat(inThr.value)*100).toFixed(2);
+    }
+    setVals();
+    inWin.oninput = setVals;
+    inTop.oninput = setVals;
+    inThr.oninput = setVals;
+
+    async function fetchRank(){
+      btnRefresh.disabled = true;
+      tbody.innerHTML = '<tr><td colspan="6" class="note">Cargando…</td></tr>';
+      try{
+        const params = new URLSearchParams({
+          top: inTop.value,
+          arrival_window_days: inWin.value,
+          alert_threshold: inThr.value
+        });
+        const res = await fetch(`${API_BASE}/rank?${params.toString()}`);
+        if(!res.ok) throw new Error('Error ' + res.status);
+        const data = await res.json();
+        lastRows = (data && data.rows) ? data.rows : [];
+        renderRows(lastRows);
+      }catch(err){
+        tbody.innerHTML = `<tr><td colspan="6" class="note">Falló la carga: ${err.message}</td></tr>`;
+      }finally{
+        btnRefresh.disabled = false;
+      }
+    }
+
+    function renderRows(rows){
+      if(!rows.length){
+        tbody.innerHTML = '<tr><td colspan="6" class="note">Sin resultados con los filtros actuales.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map(r => `
+        <tr>
+          <td>${r['Booking_ID'] ?? '-'}</td>
+          <td>${r['arrival_dt'] ?? '-'}</td>
+          <td>${r['no_of_adults'] ?? '-'}</td>
+          <td>${r['avg_price_per_room'] ?? '-'}</td>
+          <td>${r['no_of_special_requests'] ?? '-'}</td>
+          <td>${fmtPct(r['_risk'] ?? 0)}</td>
+        </tr>
+      `).join('');
+    }
+
+    btnRefresh.onclick = fetchRank;
+    // carga inicial
+    fetchRank();
+
+    btnCalc.onclick = () => {
+      const id = (inBooking.value || '').trim();
+      if(!id){ singleOut.textContent = 'Ingresa un Booking_ID.'; return; }
+      const row = lastRows.find(r => String(r['Booking_ID']) === id);
+      if(row){
+        singleOut.textContent = `Probabilidad estimada para ${id}: ${fmtPct(row['_risk'])}`;
+      }else{
+        singleOut.textContent = `Booking_ID ${id} no aparece en el ranking actual. Incrementa "Top" y/o reduce "Umbral" y vuelve a intentar.`;
+      }
+    };
+  </script>
+</body>
+</html>
